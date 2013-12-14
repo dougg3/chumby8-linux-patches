@@ -7,8 +7,10 @@ This probably doesn't work with a standard Chumby 8 root filesystem. My goal is 
 
 Inside the Linux directory, apply these patches in order:
 
-```for i in `ls ../chumby8-linux-patches/patches`; do
+```
+for i in `ls ../chumby8-linux-patches/patches`; do
     patch -Np1 -i ../chumby8-linux-patches/patches/$i
-done```
+done
+```
 
 Use the supplied chumby8-defconfig as your .config file and compile it. You will probably need to customize u-boot to load this kernel image instead of the kernel stored inside the SD card.
