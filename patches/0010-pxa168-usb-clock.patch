@@ -1,0 +1,13 @@
+Allows the USB host driver to grab the correct clock device
+diff -rup linux-3.13-rc1/drivers/usb/host/ehci-mv.c linux-3.13-rc1/drivers/usb/host/ehci-mv.c
+--- linux-3.13-rc1/drivers/usb/host/ehci-mv.c	2013-11-22 11:30:55.000000000 -0800
++++ linux-3.13-rc1/drivers/usb/host/ehci-mv.c	2013-11-29 12:39:31.721479424 -0800
+@@ -162,7 +162,7 @@ static int mv_ehci_probe(struct platform
+ 	ehci_mv->pdata = pdata;
+ 	ehci_mv->hcd = hcd;
+ 
+-	ehci_mv->clk = devm_clk_get(&pdev->dev, NULL);
++	ehci_mv->clk = devm_clk_get(&pdev->dev, "sph_clk");
+ 	if (IS_ERR(ehci_mv->clk)) {
+ 		dev_err(&pdev->dev, "error getting clock\n");
+ 		retval = PTR_ERR(ehci_mv->clk);

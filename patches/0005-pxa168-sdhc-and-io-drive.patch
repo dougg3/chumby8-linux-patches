@@ -1,0 +1,179 @@
+Adds SDHC host devices to PXA168. Also adds defines for 3.3V/1.8V pin selections
+diff -rup linux-3.13-rc1/arch/arm/mach-mmp/include/mach/pxa168.h linux-3.13-rc1/arch/arm/mach-mmp/include/mach/pxa168.h
+--- linux-3.13-rc1/arch/arm/mach-mmp/include/mach/pxa168.h	2013-11-22 11:30:55.000000000 -0800
++++ linux-3.13-rc1/arch/arm/mach-mmp/include/mach/pxa168.h	2013-11-29 14:39:35.245612652 -0800
+@@ -2,6 +2,7 @@
+ #define __ASM_MACH_PXA168_H
+ 
+ #include <linux/reboot.h>
++#include <linux/platform_data/pxa_sdhci.h>
+ 
+ extern void pxa168_timer_init(void);
+ extern void __init icu_init_irq(void);
+@@ -37,6 +38,10 @@ extern struct pxa_device_desc pxa168_dev
+ extern struct pxa_device_desc pxa168_device_fb;
+ extern struct pxa_device_desc pxa168_device_keypad;
+ extern struct pxa_device_desc pxa168_device_eth;
++extern struct pxa_device_desc pxa168_device_sdh0;
++extern struct pxa_device_desc pxa168_device_sdh1;
++extern struct pxa_device_desc pxa168_device_sdh2;
++extern struct pxa_device_desc pxa168_device_sdh3;
+ 
+ /* pdata can be NULL */
+ extern int __init pxa168_add_usb_host(struct mv_usb_platform_data *pdata);
+@@ -134,4 +139,36 @@ static inline int pxa168_add_eth(struct
+ {
+ 	return pxa_register_device(&pxa168_device_eth, data, sizeof(*data));
+ }
++
++static inline int pxa168_add_sdh(int id, struct sdhci_pxa_platdata *data)
++{
++	struct pxa_device_desc *d = NULL;
++
++	switch (id) {
++	case 0: d = &pxa168_device_sdh0; break;
++	case 1: d = &pxa168_device_sdh1; break;
++	case 2: d = &pxa168_device_sdh2; break;
++	case 3: d = &pxa168_device_sdh3; break;
++	default:
++		return -EINVAL;
++	}
++
++	return pxa_register_device(d, data, sizeof(*data));
++}
++
++#if 1
++#define VDD_IO_3P3V	0
++#define VDD_IO_1P8V	1
++typedef enum {
++	VDD_IO0,
++	VDD_IO1,
++	VDD_IO2,
++	VDD_IO3,
++	VDD_IO4,
++} vdd_io_t;
++
++void pxa168_mfp_set_fastio_drive(int type);
++void pxa168_set_vdd_iox(vdd_io_t vdd_io, int type);
++#endif
++
+ #endif /* __ASM_MACH_PXA168_H */
+diff -rup linux-3.13-rc1/arch/arm/mach-mmp/pxa168.c linux-3.13-rc1/arch/arm/mach-mmp/pxa168.c
+--- linux-3.13-rc1/arch/arm/mach-mmp/pxa168.c	2013-11-22 11:30:55.000000000 -0800
++++ linux-3.13-rc1/arch/arm/mach-mmp/pxa168.c	2013-11-29 14:38:57.509611954 -0800
+@@ -110,6 +110,10 @@ PXA168_DEVICE(ssp5, "pxa168-ssp", 4, SSP
+ PXA168_DEVICE(fb, "pxa168-fb", -1, LCD, 0xd420b000, 0x1c8);
+ PXA168_DEVICE(keypad, "pxa27x-keypad", -1, KEYPAD, 0xd4012000, 0x4c);
+ PXA168_DEVICE(eth, "pxa168-eth", -1, MFU, 0xc0800000, 0x0fff);
++PXA168_DEVICE(sdh0, "sdhci-pxav2", 0, SDH1, 0xd4280000, 0x100);
++PXA168_DEVICE(sdh1, "sdhci-pxav2", 1, SDH1, 0xd4281000, 0x100);
++PXA168_DEVICE(sdh2, "sdhci-pxav2", 2, SDH2, 0xd427e000, 0x100);
++PXA168_DEVICE(sdh3, "sdhci-pxav2", 3, SDH2, 0xd427f000, 0x100);
+ 
+ struct resource pxa168_resource_gpio[] = {
+ 	{
+@@ -176,3 +180,104 @@ void pxa168_restart(enum reboot_mode mod
+ {
+ 	soft_restart(0xffff0000);
+ }
++
++#if 1
++void mfp_set(int mfp, unsigned long mask)
++{
++	unsigned long tmp = mfp_read(mfp);
++
++	tmp |= mask;
++	mfp_write(mfp, tmp);
++}
++
++void mfp_clr(int mfp, unsigned long mask)
++{
++	unsigned long tmp = mfp_read(mfp);
++
++	tmp &= ~mask;
++	mfp_write(mfp, tmp);
++}
++
++void pxa168_mfp_set_fastio_drive(int type)
++{
++	switch (type) {
++	/* pxa168 mfpr drive strength for fast IO pins[56:85]:
++	 * ZR[0] = MFPR57[10] & MFPR59[10]
++	 * ZR[1] = MFPR56[11] & MFPR58[11]
++	 * ZR[2] = MFPR56[10] & MFPR58[10]
++	 */
++	case MFP_DS01X:
++		/* ZR[0] = ZR[1] = 0 */
++		mfp_clr(57, 1<<10);
++		mfp_clr(59, 1<<10);
++		mfp_clr(56, 1<<11);
++		mfp_clr(58, 1<<11);
++		break;
++	case MFP_DS02X:
++		/* ZR[0] = 0, ZR[1] = 1 */
++		mfp_clr(57, 1<<10);
++		mfp_clr(59, 1<<10);
++		mfp_set(56, 1<<11);
++		mfp_set(58, 1<<11);
++		break;
++	case MFP_DS03X:
++		/* ZR[0] = 1, ZR[1] = 0 */
++		mfp_set(57, 1<<10);
++		mfp_set(59, 1<<10);
++		mfp_clr(56, 1<<11);
++		mfp_clr(58, 1<<11);
++		break;
++	case MFP_DS04X:
++		/* ZR[0] = ZR[1] = 1 */
++		mfp_set(57, 1<<10);
++		mfp_set(59, 1<<10);
++		mfp_set(56, 1<<11);
++		mfp_set(58, 1<<11);
++		break;
++	default:
++		pr_err("drv type %d not supported\n", type);
++		break;
++	}
++
++	pr_info("%s config changed to %x\n", __func__, type);
++	return;
++}
++
++#define MFP_VDD_IO_SET(type, pin, bit)			\
++        do {                                            \
++		if (cpu_is_pxa168_S0()) {               \
++			if (type == VDD_IO_3P3V)	\
++				mfp_clr(pin, 1<<(bit));	\
++			else				\
++                                mfp_set(pin, 1<<(bit)); \
++                } else {                                \
++			if (type == VDD_IO_3P3V)	\
++				mfp_set(pin, 1<<(bit));	\
++			else				\
++				mfp_clr(pin, 1<<(bit));	\
++		}					\
++	} while (0);
++
++void pxa168_set_vdd_iox(vdd_io_t vdd_io, int type)
++{
++	switch (vdd_io) {
++	case VDD_IO0:
++		MFP_VDD_IO_SET(type, 60, 10);
++		break;
++	case VDD_IO1:
++		MFP_VDD_IO_SET(type, 60, 11);
++		break;
++	case VDD_IO2:
++		MFP_VDD_IO_SET(type, 61, 10);
++		break;
++	case VDD_IO3:
++		MFP_VDD_IO_SET(type, 61, 11);
++		break;
++	case VDD_IO4:
++		MFP_VDD_IO_SET(type, 62, 11);
++		break;
++	default:
++		pr_err("non-valid VDD_IO %d\n", vdd_io);
++	}
++}
++#endif

@@ -1,0 +1,22 @@
+Disables the level 2 cache very early in the boot process, eliminating weird random crashes.
+Ideally this would be done in u-boot, but it's harder to modify u-boot so I'm doing it here instead.
+diff -rup linux-3.13-rc1/arch/arm/boot/compressed/head.S linux-3.13-rc1/arch/arm/boot/compressed/head.S
+--- linux-3.13-rc1/arch/arm/boot/compressed/head.S	2013-11-22 11:30:55.000000000 -0800
++++ linux-3.13-rc1/arch/arm/boot/compressed/head.S	2013-11-29 09:26:55.317265690 -0800
+@@ -140,6 +140,16 @@ start:
+ #ifdef CONFIG_ARM_VIRT_EXT
+ 		bl	__hyp_stub_install	@ get into SVC mode, reversibly
+ #endif
++
++/* HACK ADDED BY DOUG TO DISABLE L2 CACHE EARLY IN BOOT PROCESS */
++#ifdef CONFIG_CPU_PXA168
++		mcr	p15, 1, r7, c7, c11, 0 @L2 Cache Clean All
++		mrc	p15, 0, r7, c1, c0, 0
++		bic	r7, r7, #(1 << 26)
++		mcr	p15, 0, r7, c1, c0, 0  @Disable L2 Cache
++#endif
++/* END HACK ADDED BY DOUG */
++
+ 		mov	r7, r1			@ save architecture ID
+ 		mov	r8, r2			@ save atags pointer
+ 

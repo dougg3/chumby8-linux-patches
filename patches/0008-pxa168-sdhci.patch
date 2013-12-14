@@ -1,0 +1,174 @@
+Fixes for PXA168 SDHC host controller
+Thanks: https://github.com/archlinuxarm/PKGBUILDs/tree/master/core/linux-mmp
+and
+http://lists.infradead.org/pipermail/linux-arm-kernel/2011-November/073435.html
+diff -rup linux-3.13-rc1/drivers/mmc/host/Kconfig linux-3.13-rc1/drivers/mmc/host/Kconfig
+--- linux-3.13-rc1/drivers/mmc/host/Kconfig	2013-11-22 11:30:55.000000000 -0800
++++ linux-3.13-rc1/drivers/mmc/host/Kconfig	2013-11-29 14:01:53.073570814 -0800
+@@ -219,10 +219,11 @@ config MMC_SDHCI_PXAV2
+ 	depends on CLKDEV_LOOKUP
+ 	select MMC_SDHCI
+ 	select MMC_SDHCI_PLTFM
+-	default CPU_PXA910
++	select MMC_SDHCI_IO_ACCESSORS
++	default y if (CPU_PXA910 || CPU_PXA168)
+ 	help
+ 	  This selects the Marvell(R) PXAV2 SD Host Controller.
+-	  If you have a PXA9XX platform with SD Host Controller
++	  If you have a PXAXXX platform with SD Host Controller
+ 	  and a card slot, say Y or M here.
+ 
+ 	  If unsure, say N.
+diff -rup linux-3.13-rc1/drivers/mmc/host/sdhci.c linux-3.13-rc1/drivers/mmc/host/sdhci.c
+--- linux-3.13-rc1/drivers/mmc/host/sdhci.c	2013-11-22 11:30:55.000000000 -0800
++++ linux-3.13-rc1/drivers/mmc/host/sdhci.c	2013-11-29 22:36:14.646141594 -0800
+@@ -1012,6 +1012,9 @@ void sdhci_send_command(struct sdhci_hos
+ 		timeout--;
+ 		mdelay(1);
+ 	}
++	
++	if (host->ops->platform_specific_completion)
++		host->ops->platform_specific_completion(host);
+ 
+ 	mod_timer(&host->timer, jiffies + 10 * HZ);
+ 
+@@ -1174,19 +1177,30 @@ static void sdhci_set_clock(struct sdhci
+ 		 * Mode.
+ 		 */
+ 		if (host->clk_mul) {
+-			for (div = 1; div <= 1024; div++) {
+-				if ((host->max_clk * host->clk_mul / div)
+-					<= clock)
+-					break;
+-			}
++			u16 ctrl;
++			
+ 			/*
+-			 * Set Programmable Clock Mode in the Clock
+-			 * Control register.
++			 * We need to figure out whether the Host Driver needs
++			 * to select Programmable Clock Mode, or the value can
++			 * be set automatically by the Host Controller based on
++			 * the Preset Value registers.
+ 			 */
+-			clk = SDHCI_PROG_CLOCK_MODE;
+-			real_div = div;
+-			clk_mul = host->clk_mul;
+-			div--;
++			ctrl = sdhci_readw(host, SDHCI_HOST_CONTROL2);
++			if (!(ctrl & SDHCI_CTRL_PRESET_VAL_ENABLE)) {
++				for (div = 1; div <= 1024; div++) {
++					if ((host->max_clk * host->clk_mul / div)
++						<= clock)
++						break;
++				}
++				/*
++				 * Set Programmable Clock Mode in the Clock
++				 * Control register.
++				 */
++				clk = SDHCI_PROG_CLOCK_MODE;
++				real_div = div;
++				clk_mul = host->clk_mul;
++				div--;
++			}
+ 		} else {
+ 			/* Version 3.00 divisors must be a multiple of 2. */
+ 			if (host->max_clk <= clock)
+diff -rup linux-3.13-rc1/drivers/mmc/host/sdhci.h linux-3.13-rc1/drivers/mmc/host/sdhci.h
+--- linux-3.13-rc1/drivers/mmc/host/sdhci.h	2013-11-22 11:30:55.000000000 -0800
++++ linux-3.13-rc1/drivers/mmc/host/sdhci.h	2013-11-29 14:05:52.417575240 -0800
+@@ -293,6 +293,7 @@ struct sdhci_ops {
+ 	void	(*hw_reset)(struct sdhci_host *host);
+ 	void	(*platform_suspend)(struct sdhci_host *host);
+ 	void	(*platform_resume)(struct sdhci_host *host);
++	void	(*platform_specific_completion)(struct sdhci_host *host);
+ 	void    (*adma_workaround)(struct sdhci_host *host, u32 intmask);
+ 	void	(*platform_init)(struct sdhci_host *host);
+ 	void    (*card_event)(struct sdhci_host *host);
+diff -rup linux-3.13-rc1/drivers/mmc/host/sdhci-pxav2.c linux-3.13-rc1/drivers/mmc/host/sdhci-pxav2.c
+--- linux-3.13-rc1/drivers/mmc/host/sdhci-pxav2.c	2013-11-22 11:30:55.000000000 -0800
++++ linux-3.13-rc1/drivers/mmc/host/sdhci-pxav2.c	2013-11-30 15:49:27.695288146 -0800
+@@ -30,6 +30,7 @@
+ #include <linux/slab.h>
+ #include <linux/of.h>
+ #include <linux/of_device.h>
++#include <linux/delay.h>
+ 
+ #include "sdhci.h"
+ #include "sdhci-pltfm.h"
+@@ -75,7 +76,12 @@ static void pxav2_set_private_registers(
+ 			writew(tmp, host->ioaddr + SD_CLOCK_BURST_SIZE_SETUP);
+ 		}
+ 
+-		if (pdata && (pdata->flags & PXA_FLAG_ENABLE_CLOCK_GATING)) {
++		if (pdata && pdata->pxav1_controller) {
++			/* no clock gating */
++			tmp = readw(host->ioaddr + SD_FIFO_PARAM);
++			tmp |= DIS_PAD_SD_CLK_GATE;
++			writew(tmp, host->ioaddr + SD_FIFO_PARAM);
++		} else if (pdata && (pdata->flags & PXA_FLAG_ENABLE_CLOCK_GATING)) {
+ 			tmp = readw(host->ioaddr + SD_FIFO_PARAM);
+ 			tmp &= ~CLK_GATE_SETTING_BITS;
+ 			writew(tmp, host->ioaddr + SD_FIFO_PARAM);
+@@ -111,10 +117,40 @@ static int pxav2_mmc_set_width(struct sd
+ 	return 0;
+ }
+ 
++/*
++ * Remap version register so that we don't crash and burn
++ */
++static inline u16 pxa168_readw(struct sdhci_host *host, int reg)
++{
++	u32 temp;
++	if (reg == SDHCI_HOST_VERSION) {
++		temp = readl (host->ioaddr + SDHCI_HOST_VERSION - 2) >> 16;
++		return temp & 0xffff;
++	}
++	
++	return readw(host->ioaddr + reg);
++}
++
++/* 
++ * we cannot talk to controller for 8 bus cycles according to sdio spec
++ * at lowest speed this is 100,000 HZ per cycle or 800,000 cycles
++ * which is quite a LONG TIME on a fast cpu -- so delay if needed
++ */
++static void platform_specific_completion(struct sdhci_host *host)
++{
++	struct platform_device *pdev = to_platform_device(mmc_dev(host->mmc));
++	struct sdhci_pxa_platdata *pdata = pdev->dev.platform_data;
++	
++	if (host->clock < 3200000 && pdata && pdata->delay_in_ms)
++		mdelay(pdata->delay_in_ms);
++}
++
+ static const struct sdhci_ops pxav2_sdhci_ops = {
++	.read_w = &pxa168_readw,
+ 	.get_max_clock = sdhci_pltfm_clk_get_max_clock,
+ 	.platform_reset_exit = pxav2_set_private_registers,
+ 	.platform_bus_width = pxav2_mmc_set_width,
++	.platform_specific_completion = platform_specific_completion,
+ };
+ 
+ #ifdef CONFIG_OF
+diff -rup linux-3.13-rc1/include/linux/platform_data/pxa_sdhci.h linux-3.13-rc1/include/linux/platform_data/pxa_sdhci.h
+--- linux-3.13-rc1/include/linux/platform_data/pxa_sdhci.h	2013-11-22 11:30:55.000000000 -0800
++++ linux-3.13-rc1/include/linux/platform_data/pxa_sdhci.h	2013-11-29 22:11:10.922113783 -0800
+@@ -40,6 +40,8 @@
+  * @quirks: quirks of platfrom
+  * @quirks2: quirks2 of platfrom
+  * @pm_caps: pm_caps of platfrom
++ * @pxav1_controller: set if pxa168
++ * @delay_in_ms: delay for pxa168 after commands
+  */
+ struct sdhci_pxa_platdata {
+ 	unsigned int	flags;
+@@ -54,6 +56,8 @@ struct sdhci_pxa_platdata {
+ 	unsigned int	quirks;
+ 	unsigned int	quirks2;
+ 	unsigned int	pm_caps;
++	bool		pxav1_controller;
++	unsigned int	delay_in_ms;
+ };
+ 
+ struct sdhci_pxa {

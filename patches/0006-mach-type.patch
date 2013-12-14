@@ -1,0 +1,14 @@
+Changes mach type for aspenite to match Chumby 8.
+This should probably actually be added as a new mach type for Chumby 8.
+diff -rup linux-3.13-rc1/arch/arm/tools/mach-types linux-3.13-rc1/arch/arm/tools/mach-types
+--- linux-3.13-rc1/arch/arm/tools/mach-types	2013-11-22 11:30:55.000000000 -0800
++++ linux-3.13-rc1/arch/arm/tools/mach-types	2013-11-28 22:11:40.652516378 -0800
+@@ -374,7 +374,7 @@ cpuat9g20		MACH_CPUAT9G20		CPUAT9G20		20
+ smdk6440		MACH_SMDK6440		SMDK6440		2032
+ nas4220b		MACH_NAS4220B		NAS4220B		2038
+ zylonite2		MACH_ZYLONITE2		ZYLONITE2		2042
+-aspenite		MACH_ASPENITE		ASPENITE		2043
++aspenite		MACH_ASPENITE		ASPENITE		1829
+ ttc_dkb			MACH_TTC_DKB		TTC_DKB			2045
+ pcm043			MACH_PCM043		PCM043			2072
+ sheevaplug		MACH_SHEEVAPLUG		SHEEVAPLUG		2097
